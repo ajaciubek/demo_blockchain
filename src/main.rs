@@ -10,6 +10,7 @@ use libp2p::{
     tcp::TokioTcpConfig,
     Transport,
 };
+use p2p::PEER_ID;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::{
@@ -170,6 +171,7 @@ impl App {
 }
 #[tokio::main]
 async fn main() {
+    println!("PEER ID {}", *PEER_ID);
     let (response_sender, mut response_rcv) = mpsc::unbounded_channel();
     let (init_sender, mut init_rcv) = mpsc::unbounded_channel();
     let auth_keys = Keypair::<X25519Spec>::new()
@@ -216,7 +218,7 @@ async fn main() {
                     Some(p2p::EventType::Init)
                 },
                 event = swarm.select_next_some() =>{
-                    print!("unhandled swarm event {:?}",event);
+                    // println!("unhandled swarm event {:?}",event);
                     None
                 }
             }
@@ -224,12 +226,43 @@ async fn main() {
 
         if let Some(event) = evt {
             match event {
-                p2p::EventType::Init => {}
-                p2p::EventType::LocalChainResponse(resp) => {}
+                p2p::EventType::Init => {
+                    let peers = p2p::get_list_peers(&swarm);
+                    swarm.behaviour_mut().app.genesis();
+
+                    println!("connected nodes: {}", peers.len());
+
+                    if !peers.is_empty() {
+                        let req = p2p::LocalChainRequest {
+                            from_peer_id: peers
+                                .iter()
+                                .last()
+                                .expect("at lease one peer")
+                                .to_string(),
+                        };
+
+                        let json = serde_json::to_string(&req).expect("can jsonify request");
+
+                        swarm
+                            .behaviour_mut()
+                            .floodsub
+                            .publish(p2p::CHAIN_TOPIC.clone(), json.as_bytes());
+                    }
+                }
+                p2p::EventType::LocalChainResponse(resp) => {
+                    let json = serde_json::to_string(&resp).expect("can jsonify response");
+                    swarm
+                        .behaviour_mut()
+                        .floodsub
+                        .publish(p2p::CHAIN_TOPIC.clone(), json.as_bytes());
+                }
                 p2p::EventType::Input(line) => match line.as_str() {
                     "ls p" => {
                         p2p::handle_print_peers(&swarm);
                     }
+                    cmd if cmd.starts_with("create b") => p2p::handle_create_block(cmd, &mut swarm),
+                    cmd if cmd.starts_with("ls c") => p2p::handle_print_chain(&swarm),
+
                     _ => print!("unspported command"),
                 },
             }

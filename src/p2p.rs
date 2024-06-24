@@ -128,3 +128,31 @@ pub fn handle_print_peers(swarm: &Swarm<AppBehaviour>) {
     let peers = get_list_peers(swarm);
     peers.iter().for_each(|p| println!("{}", p));
 }
+
+pub fn handle_create_block(cmd: &str, swarm: &mut Swarm<AppBehaviour>) {
+    if let Some(data) = cmd.strip_prefix("create b") {
+        let behaviour = swarm.behaviour_mut();
+        let latest_block = behaviour
+            .app
+            .blocks
+            .last()
+            .expect("there is at least one block");
+        let block = Block::new(
+            latest_block.id + 1,
+            latest_block.hash.clone(),
+            data.to_owned(),
+        );
+        let json = serde_json::to_string(&block).expect("can jsonify request");
+        behaviour.app.blocks.push(block);
+        println!("broadcasting new block");
+        behaviour
+            .floodsub
+            .publish(BLOCK_TOPIC.clone(), json.as_bytes());
+    }
+}
+
+pub fn handle_print_chain(swarm: &Swarm<AppBehaviour>) {
+    let json =
+        serde_json::to_string_pretty(&swarm.behaviour().app.blocks).expect("can jsonify blcoks");
+    print!("{}", json);
+}
