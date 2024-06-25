@@ -25,6 +25,9 @@ async fn main() {
     println!("PEER ID {}", *PEER_ID);
     let (response_sender, mut response_rcv) = mpsc::unbounded_channel();
     let (init_sender, mut init_rcv) = mpsc::unbounded_channel();
+    // this will keep the channel open so recv will sleep
+    let _init_sender = init_sender.clone();
+
     let auth_keys = Keypair::<X25519Spec>::new()
         .into_authentic(&p2p::KEYS)
         .expect("can create auth keys");
@@ -34,8 +37,7 @@ async fn main() {
         .authenticate(NoiseConfig::xx(auth_keys).into_authenticated())
         .multiplex(mplex::MplexConfig::new())
         .boxed();
-    let behaviour =
-        p2p::AppBehaviour::new(blockchain::App::new(), response_sender, init_sender.clone()).await;
+    let behaviour = p2p::AppBehaviour::new(blockchain::App::new(), response_sender).await;
     let mut swarm = SwarmBuilder::new(transport, behaviour, *p2p::PEER_ID)
         .executor(Box::new(|fut| {
             spawn(fut);

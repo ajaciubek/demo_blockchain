@@ -41,17 +41,11 @@ pub struct AppBehaviour {
     #[behaviour(ignore)]
     pub reponse_sender: mpsc::UnboundedSender<ChainResponse>,
     #[behaviour(ignore)]
-    pub init_sender: mpsc::UnboundedSender<bool>,
-    #[behaviour(ignore)]
     pub app: App,
 }
 
 impl AppBehaviour {
-    pub async fn new(
-        app: App,
-        reponse_sender: mpsc::UnboundedSender<ChainResponse>,
-        init_sender: mpsc::UnboundedSender<bool>,
-    ) -> Self {
+    pub async fn new(app: App, reponse_sender: mpsc::UnboundedSender<ChainResponse>) -> Self {
         let mut behaviour = AppBehaviour {
             app,
             floodsub: Floodsub::new(*PEER_ID),
@@ -59,7 +53,6 @@ impl AppBehaviour {
                 .await
                 .expect("cannot create mdns"),
             reponse_sender,
-            init_sender,
         };
         behaviour.floodsub.subscribe(CHAIN_TOPIC.clone());
         behaviour.floodsub.subscribe(BLOCK_TOPIC.clone());
