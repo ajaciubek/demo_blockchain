@@ -1,11 +1,11 @@
 use std::collections::HashSet;
 
-use super::{App, Block};
+use crate::blockchain::{App, Block};
 use libp2p::{
     floodsub::{Floodsub, FloodsubEvent, Topic},
     identity,
     mdns::{Mdns, MdnsEvent},
-    swarm::{NetworkBehaviourEventProcess, Swarm},
+    swarm::NetworkBehaviourEventProcess,
     NetworkBehaviour, PeerId,
 };
 use once_cell::sync::Lazy;
@@ -65,6 +65,58 @@ impl AppBehaviour {
         behaviour.floodsub.subscribe(BLOCK_TOPIC.clone());
         behaviour
     }
+
+    pub fn handle_create_block(&mut self, cmd: &str) {
+        if let Some(data) = cmd.strip_prefix("create b") {
+            let latest_block = self.app.blocks.last().expect("there is at least one block");
+            let block = Block::new(
+                latest_block.id + 1,
+                latest_block.hash.clone(),
+                data.to_owned(),
+            );
+            let json = serde_json::to_string(&block).expect("can jsonify request");
+            self.app.blocks.push(block);
+            println!("broadcasting new block");
+            self.floodsub.publish(BLOCK_TOPIC.clone(), json.as_bytes());
+        }
+    }
+
+    pub fn print_chain(&self) {
+        let json = serde_json::to_string_pretty(&self.app.blocks).expect("can jsonify blcoks");
+        print!("{}", json);
+    }
+
+    pub fn handle_init(&mut self) {
+        let peers = self.get_list_peers();
+        self.app.genesis();
+
+        println!("connected nodes: {}", peers.len());
+
+        if !peers.is_empty() {
+            let req = LocalChainRequest {
+                from_peer_id: peers.iter().last().expect("at lease one peer").to_string(),
+            };
+
+            let json = serde_json::to_string(&req).expect("can jsonify request");
+
+            self.floodsub.publish(CHAIN_TOPIC.clone(), json.as_bytes());
+        }
+    }
+
+    fn get_list_peers(&self) -> Vec<String> {
+        println!("Discover peers");
+        let nodes = self.mdns.discovered_nodes();
+        let mut unique_peers = HashSet::new();
+        for peer in nodes {
+            unique_peers.insert(peer);
+        }
+        unique_peers.iter().map(|p| p.to_string()).collect()
+    }
+
+    pub fn handle_print_peers(&self) {
+        let peers = self.get_list_peers();
+        peers.iter().for_each(|p| println!("{}", p));
+    }
 }
 
 impl NetworkBehaviourEventProcess<MdnsEvent> for AppBehaviour {
@@ -112,47 +164,4 @@ impl NetworkBehaviourEventProcess<FloodsubEvent> for AppBehaviour {
             }
         }
     }
-}
-
-pub fn get_list_peers(swarm: &Swarm<AppBehaviour>) -> Vec<String> {
-    println!("Discover peers");
-    let nodes = swarm.behaviour().mdns.discovered_nodes();
-    let mut unique_peers = HashSet::new();
-    for peer in nodes {
-        unique_peers.insert(peer);
-    }
-    unique_peers.iter().map(|p| p.to_string()).collect()
-}
-
-pub fn handle_print_peers(swarm: &Swarm<AppBehaviour>) {
-    let peers = get_list_peers(swarm);
-    peers.iter().for_each(|p| println!("{}", p));
-}
-
-pub fn handle_create_block(cmd: &str, swarm: &mut Swarm<AppBehaviour>) {
-    if let Some(data) = cmd.strip_prefix("create b") {
-        let behaviour = swarm.behaviour_mut();
-        let latest_block = behaviour
-            .app
-            .blocks
-            .last()
-            .expect("there is at least one block");
-        let block = Block::new(
-            latest_block.id + 1,
-            latest_block.hash.clone(),
-            data.to_owned(),
-        );
-        let json = serde_json::to_string(&block).expect("can jsonify request");
-        behaviour.app.blocks.push(block);
-        println!("broadcasting new block");
-        behaviour
-            .floodsub
-            .publish(BLOCK_TOPIC.clone(), json.as_bytes());
-    }
-}
-
-pub fn handle_print_chain(swarm: &Swarm<AppBehaviour>) {
-    let json =
-        serde_json::to_string_pretty(&swarm.behaviour().app.blocks).expect("can jsonify blcoks");
-    print!("{}", json);
 }
